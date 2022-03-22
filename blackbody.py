@@ -1,7 +1,7 @@
 # this file is for every temperature/redshift/blackbody related function
 
 import numpy as np
-import scipy.misc as spm
+import imageio as spm
 
 #accretion disk log temperature profile (R^{-3/4})
 LOGSHIFT = 0.823959216501 # 3/4 log(3)

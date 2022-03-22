@@ -3,7 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndim
-import scipy.misc as spm
+import imageio as spm
 import random,sys,time,os
 import datetime
 
@@ -15,16 +15,14 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 #importing scene
-try:
-    import ConfigParser as configparser
-except ImportError: # we're on python 3
-    import configparser
+import configparser
 
 import blackbody as bb
 import bloom
 
 import gc
 import curses
+from PIL import Image
 
 
 #enums
@@ -313,7 +311,7 @@ def rgbtosrgb(arr):
     arr[mask] **= 1/2.4
     arr[mask] *= 1.055
     arr[mask] -= 0.055
-    arr[-mask] *= 12.92
+    arr[~mask] *= 12.92
 
 
 # convert from srgb to linear rgb
@@ -323,7 +321,7 @@ def srgbtorgb(arr):
     arr[mask] += 0.055
     arr[mask] /= 1.055
     arr[mask] **= 2.4
-    arr[-mask] /= 12.92
+    arr[~mask] /= 12.92#较原文件进行了修改，将-改为~
 
 
 logger.debug("Loading textures...")
@@ -338,7 +336,8 @@ if SKY_TEXTURE == 'texture':
     if not LOFI:
         #   maybe doing this manually and then loading is better.
         logger.debug("(zooming sky texture...)")
-        texarr_sky = spm.imresize(texarr_sky,2.0,interp='bicubic')
+        #texarr_sky = spm.imresize(texarr_sky,2.0,interp='bicubic')
+        texarr_sky = np.array(Image.fromarray(texarr_sky, mode="RGB").resize((4096,8192)))#新版本scipy没有imresize，改用这个；原图像大小为2048*4096，放大两倍
         # imresize converts back to uint8 for whatever reason
         texarr_sky = texarr_sky.astype(float)
         texarr_sky /= 255.0
@@ -914,134 +913,134 @@ for i in range(NTHREADS):
     process_list.append(p)
 
 logger.debug("Starting threads...")
+if __name__=="__main__":
+    for proc in process_list:
+        proc.start()
 
-for proc in process_list:
-    proc.start()
+    try:
+        refreshcounter = 0
+        while True:
+            refreshcounter+=1
+            time.sleep(0.1)
+        
+            output.parsemessages()
 
-try:
-    refreshcounter = 0
-    while True:
-        refreshcounter+=1
-        time.sleep(0.1)
-    
-        output.parsemessages()
+            if not DISABLE_DISPLAY and (refreshcounter%40 == 0):
+                output.setmessage("Updating display...",-1)
+                plt.imshow(total_colour_buffer_preproc.reshape((RESOLUTION[1],RESOLUTION[0],3)))
+                plt.draw()
 
-        if not DISABLE_DISPLAY and (refreshcounter%40 == 0):
-            output.setmessage("Updating display...",-1)
-            plt.imshow(total_colour_buffer_preproc.reshape((RESOLUTION[1],RESOLUTION[0],3)))
-            plt.draw()
+            output.setmessage("Idle.", -1)
 
-        output.setmessage("Idle.", -1)
-
-        alldone = True
+            alldone = True
+            for i in range(NTHREADS):
+                if process_list[i].is_alive():
+                    alldone = False
+            if alldone:
+                break
+    except KeyboardInterrupt:
         for i in range(NTHREADS):
-            if process_list[i].is_alive():
-                alldone = False
-        if alldone:
-            break
-except KeyboardInterrupt:
-    for i in range(NTHREADS):
-        killers[i] = True
-    sys.exit()
+            killers[i] = True
+        sys.exit()
 
-del output
+    del output
 
 
-logger.debug("Done tracing.")
+    logger.debug("Done tracing.")
 
-logger.debug("Total raytracing time: %s", datetime.timedelta(seconds=(time.time() - start_time)))
-
-
-logger.debug("Postprocessing...")
-
-#gain
-logger.debug("- gain...")
-total_colour_buffer_preproc *= GAIN
+    logger.debug("Total raytracing time: %s", datetime.timedelta(seconds=(time.time() - start_time)))
 
 
-# airy bloom
-if AIRY_BLOOM:
+    logger.debug("Postprocessing...")
 
-    logger.debug("-computing Airy disk bloom...")
+    #gain
+    logger.debug("- gain...")
+    total_colour_buffer_preproc *= GAIN
+
+
+    # airy bloom
+    if AIRY_BLOOM:
+
+        logger.debug("-computing Airy disk bloom...")
+        
+        #blending bloom
+
+        #colour = total_colour_buffer_preproc + 0.3*blurd #0.2*dbg_grid + 0.8*dbg_finvec
+        
+        #airy disk bloom
+
+        colour_bloomd = np.copy(total_colour_buffer_preproc)
+        colour_bloomd = colour_bloomd.reshape((RESOLUTION[1],RESOLUTION[0],3))
+
+
+        # the float constant is 1.22 * 650nm / (4 mm), the typical diffractive resolution
+        # of the human eye for red light. It's in radians, so we rescale using field of view.
+        radd = 0.00019825 * RESOLUTION[0] / np.arctan(TANFOV)
+
+        # the user is allowed to rescale the resolution, though
+        radd*=AIRY_RADIUS 
+
+        # the pixel size of the kernel:
+        # 25 pixels radius is ok for 5.0 bright source pixel at 1920x1080, so...
+        # remembering that airy ~ 1/x^3, so if we want intensity/x^3 < hreshold => 
+        # => max_x = (intensity/threshold)^1/3
+        # so it scales with 
+        # - the cube root of maximum intensity
+        # - linear in resolution
+
+        mxint = np.amax(colour_bloomd)
+
+        kern_radius = 25 * np.power( np.amax(colour_bloomd) / 5.0 , 1./3.) * RESOLUTION[0]/1920.
+
+        logger.debug("--(radius: %3f, kernel pixel radius: %3f, maximum source brightness: %3f)", radd, kern_radius, mxint)
+        
+        colour_bloomd = bloom.airy_convolve(colour_bloomd,radd)
     
-    #blending bloom
-
-    #colour = total_colour_buffer_preproc + 0.3*blurd #0.2*dbg_grid + 0.8*dbg_finvec
-    
-    #airy disk bloom
-
-    colour_bloomd = np.copy(total_colour_buffer_preproc)
-    colour_bloomd = colour_bloomd.reshape((RESOLUTION[1],RESOLUTION[0],3))
+        colour_bloomd = colour_bloomd.reshape((numPixels,3))
 
 
-    # the float constant is 1.22 * 650nm / (4 mm), the typical diffractive resolution
-    # of the human eye for red light. It's in radians, so we rescale using field of view.
-    radd = 0.00019825 * RESOLUTION[0] / np.arctan(TANFOV)
-
-    # the user is allowed to rescale the resolution, though
-    radd*=AIRY_RADIUS 
-
-    # the pixel size of the kernel:
-    # 25 pixels radius is ok for 5.0 bright source pixel at 1920x1080, so...
-    # remembering that airy ~ 1/x^3, so if we want intensity/x^3 < hreshold => 
-    # => max_x = (intensity/threshold)^1/3
-    # so it scales with 
-    # - the cube root of maximum intensity
-    # - linear in resolution
-
-    mxint = np.amax(colour_bloomd)
-
-    kern_radius = 25 * np.power( np.amax(colour_bloomd) / 5.0 , 1./3.) * RESOLUTION[0]/1920.
-
-    logger.debug("--(radius: %3f, kernel pixel radius: %3f, maximum source brightness: %3f)", radd, kern_radius, mxint)
-    
-    colour_bloomd = bloom.airy_convolve(colour_bloomd,radd)
- 
-    colour_bloomd = colour_bloomd.reshape((numPixels,3))
+        colour_pb = colour_bloomd
+    else:
+        colour_pb = total_colour_buffer_preproc
 
 
-    colour_pb = colour_bloomd
-else:
-    colour_pb = total_colour_buffer_preproc
+    # wide gaussian (lighting dust effect)
 
+    if BLURDO:
 
-# wide gaussian (lighting dust effect)
+        logger.debug("-computing wide gaussian blur...")
+        
+        #hipass = np.outer(sqrnorm(total_colour_buffer_preproc) > BLOOMCUT, np.array([1.,1.,1.])) * total_colour_buffer_preproc
+        blurd = np.copy(total_colour_buffer_preproc)
 
-if BLURDO:
+        blurd = blurd.reshape((RESOLUTION[1],RESOLUTION[0],3))
 
-    logger.debug("-computing wide gaussian blur...")
-    
-    #hipass = np.outer(sqrnorm(total_colour_buffer_preproc) > BLOOMCUT, np.array([1.,1.,1.])) * total_colour_buffer_preproc
-    blurd = np.copy(total_colour_buffer_preproc)
+        for i in range(2):
+            logger.debug("- gaussian blur pass %d...", i)
+            blurd = ndim.gaussian_filter(blurd,int(0.05*RESOLUTION[0]))
 
-    blurd = blurd.reshape((RESOLUTION[1],RESOLUTION[0],3))
-
-    for i in range(2):
-        logger.debug("- gaussian blur pass %d...", i)
-        blurd = ndim.gaussian_filter(blurd,int(0.05*RESOLUTION[0]))
-
-    blurd = blurd.reshape((numPixels,3))
-    colour = colour_pb + 0.2 * blurd
-else:
-    colour = colour_pb
+        blurd = blurd.reshape((numPixels,3))
+        colour = colour_pb + 0.2 * blurd
+    else:
+        colour = colour_pb
 
 
 
-#normalization
-if NORMALIZE > 0:
-    logger.debug("- normalizing...")
-    colour *= 1 / (NORMALIZE * np.amax(colour.flatten()) )
+    #normalization
+    if NORMALIZE > 0:
+        logger.debug("- normalizing...")
+        colour *= 1 / (NORMALIZE * np.amax(colour.flatten()) )
 
 
 
 
-#final colour
-colour = np.clip(colour,0.,1.)
+    #final colour
+    colour = np.clip(colour,0.,1.)
 
 
-logger.debug("Conversion to image and saving...")
+    logger.debug("Conversion to image and saving...")
 
-saveToImg(colour,"tests/out.png")
-saveToImg(total_colour_buffer_preproc,"tests/preproc.png")
-if BLURDO:
-    saveToImg(colour_pb,"tests/postbloom.png")
+    saveToImg(colour,"tests/out.png")
+    saveToImg(total_colour_buffer_preproc,"tests/preproc.png")
+    if BLURDO:
+        saveToImg(colour_pb,"tests/postbloom.png")
