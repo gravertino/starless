@@ -336,8 +336,7 @@ if SKY_TEXTURE == 'texture':
     if not LOFI:
         #   maybe doing this manually and then loading is better.
         logger.debug("(zooming sky texture...)")
-        #texarr_sky = spm.imresize(texarr_sky,2.0,interp='bicubic')
-        texarr_sky = np.array(Image.fromarray(texarr_sky, mode="RGB").resize((4096,8192)))#新版本scipy没有imresize，改用这个；原图像大小为2048*4096，放大两倍
+        texarr_sky = np.array(Image.fromarray(texarr_sky, mode="RGB").resize((int(2*texarr_sky.shape[0]),int(2*texarr_sky.shape[1])), resample=Image.BICUBIC))#新版本scipy没有imresize，改用这个；原图像大小为2048*4096，放大两倍
         # imresize converts back to uint8 for whatever reason
         texarr_sky = texarr_sky.astype(float)
         texarr_sky /= 255.0

@@ -6,7 +6,7 @@
 [lofi]
 
 # output resolution
-Resolution=160,120
+Resolution=1920,1440
 
 #number of raytracing steps
 Iterations=250
@@ -19,7 +19,7 @@ Stepsize=0.16
 # apply when rendering without the -d option
 [hifi]
 
-Resolution=1024,786
+Resolution=1920,1440
 Iterations=250
 Stepsize=0.16
 
