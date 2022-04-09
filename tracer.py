@@ -433,9 +433,10 @@ def sixth(v):
 def RK4f(y,h2):
     f = np.zeros(y.shape)
     f[:,0:3] = y[:,3:6]
-    f[:,3:6] = - 1.5 * h2 * y[:,0:3] / np.power(sqrnorm(y[:,0:3]),2.5)[:,np.newaxis]
+    #f[:,3:6]=-1.5 * h2 * y[:,0:3] / np.power(sqrnorm(y[:,0:3]),2.5)[:,np.newaxis]
+    f[:,3:6] = - 1.5 * h2 * y[:,0:3] / sixth(y[:,0:3])[:,np.newaxis]
     return f
-
+# 根据作者网页上的公式，此处分母上应为y的六次方；根据作者注释，sixth()比较快:)
 
 # this blends colours ca and cb by placing ca in front of cb
 def blendcolors(cb,balpha,ca,aalpha):
